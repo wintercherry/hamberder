@@ -399,9 +399,38 @@ fn test_no_leading_zeroes() {
 */
 
 #[test]
-fn test_parse_bad_float() {
-    // todo: add test to make sure stuff like "- 5" and "1 .   2" and so on don't work
-    assert!(false);
+fn test_parse_bad_float_1() {
+    let (string_tx, string_rx) = std::sync::mpsc::channel();
+    let (token_tx, token_rx) = std::sync::mpsc::channel();
+    lexer::lex(string_rx, token_tx);
+    string_tx.send(String::from("- 1234")).unwrap();
+    drop(string_tx); // force closed
+    let tokens: Vec<(lexer::MaybeToken, lexer::TokenInfo)> = token_rx.iter().collect();
+    assert_eq!(tokens.len(), 2);
+    assert_eq!(tokens[0].0, lexer::MaybeToken::MinusSign);
+    if let lexer::MaybeToken::Error(_) = &tokens[1].0 {
+        //...
+    } else {
+        assert!(false);
+    }
+}
+
+#[test]
+fn test_parse_bad_float_2() {
+    let (string_tx, string_rx) = std::sync::mpsc::channel();
+    let (token_tx, token_rx) = std::sync::mpsc::channel();
+    lexer::lex(string_rx, token_tx);
+    string_tx.send(String::from("12\t.\r34")).unwrap();
+    drop(string_tx); // force closed
+    let tokens: Vec<(lexer::MaybeToken, lexer::TokenInfo)> = token_rx.iter().collect();
+    println!("dumping tokens: {:?}", tokens);
+    assert_eq!(tokens.len(), 2);
+    assert_eq!(tokens[0].0, lexer::MaybeToken::Integer(String::from("12")));
+    if let lexer::MaybeToken::Error(_) = &tokens[1].0 {
+        //...
+    } else {
+        assert!(false);
+    }
 }
 
 #[test]
@@ -540,7 +569,9 @@ fn test_lexer_array() {
     let (string_tx, string_rx) = std::sync::mpsc::channel();
     let (token_tx, token_rx) = std::sync::mpsc::channel();
     lexer::lex(string_rx, token_tx);
-    string_tx.send(String::from("[false, null, true, 1.234E+2, \"bla\", {}]")).unwrap();
+    string_tx
+        .send(String::from("[false, null, true, 1.234E+2, \"bla\", {}]"))
+        .unwrap();
     drop(string_tx); // force closed
     let tokens: Vec<(lexer::MaybeToken, lexer::TokenInfo)> = token_rx.iter().collect();
     assert_eq!(tokens.len(), 19);
@@ -558,7 +589,10 @@ fn test_lexer_array() {
     assert_eq!(tokens[11].0, lexer::MaybeToken::PlusSign);
     assert_eq!(tokens[12].0, lexer::MaybeToken::Integer(String::from("2")));
     assert_eq!(tokens[13].0, lexer::MaybeToken::Comma);
-    assert_eq!(tokens[14].0, lexer::MaybeToken::StringLiteral(String::from("\"bla\"")));
+    assert_eq!(
+        tokens[14].0,
+        lexer::MaybeToken::StringLiteral(String::from("\"bla\""))
+    );
     assert_eq!(tokens[15].0, lexer::MaybeToken::Comma);
     assert_eq!(tokens[16].0, lexer::MaybeToken::LeftCurly);
     assert_eq!(tokens[17].0, lexer::MaybeToken::RightCurly);
@@ -617,7 +651,9 @@ fn test_lexer_object() {
     let (string_tx, string_rx) = std::sync::mpsc::channel();
     let (token_tx, token_rx) = std::sync::mpsc::channel();
     lexer::lex(string_rx, token_tx);
-    string_tx.send(String::from("{
+    string_tx
+        .send(String::from(
+            "{
         \"key1\": null,
         \"key2\": -42,
         \"key3\": [
@@ -626,26 +662,38 @@ fn test_lexer_object() {
         \"key4\": {
             \"key5\": {}
         }
-    }")).unwrap();
+    }",
+        ))
+        .unwrap();
     drop(string_tx); // force closed
     let tokens: Vec<(lexer::MaybeToken, lexer::TokenInfo)> = token_rx.iter().collect();
     assert_eq!(tokens.len(), 25);
     let expected_tokens = vec![
-        lexer::MaybeToken::LeftCurly, lexer::MaybeToken::StringLiteral(String::from("\"key1\"")),
-        lexer::MaybeToken::Colon, lexer::MaybeToken::NullLiteral, lexer::MaybeToken::Comma,
+        lexer::MaybeToken::LeftCurly,
+        lexer::MaybeToken::StringLiteral(String::from("\"key1\"")),
+        lexer::MaybeToken::Colon,
+        lexer::MaybeToken::NullLiteral,
+        lexer::MaybeToken::Comma,
         lexer::MaybeToken::StringLiteral(String::from("\"key2\"")),
-        lexer::MaybeToken::Colon, lexer::MaybeToken::MinusSign, 
+        lexer::MaybeToken::Colon,
+        lexer::MaybeToken::MinusSign,
         lexer::MaybeToken::Integer(String::from("42")),
         lexer::MaybeToken::Comma,
         lexer::MaybeToken::StringLiteral(String::from("\"key3\"")),
-        lexer::MaybeToken::Colon, lexer::MaybeToken::LeftBracket,
-        lexer::MaybeToken::FalseLiteral, lexer::MaybeToken::RightBracket,
-        lexer::MaybeToken::Comma, lexer::MaybeToken::StringLiteral(String::from("\"key4\"")),
         lexer::MaybeToken::Colon,
-        lexer::MaybeToken::LeftCurly, lexer::MaybeToken::StringLiteral(String::from("\"key5\"")), 
+        lexer::MaybeToken::LeftBracket,
+        lexer::MaybeToken::FalseLiteral,
+        lexer::MaybeToken::RightBracket,
+        lexer::MaybeToken::Comma,
+        lexer::MaybeToken::StringLiteral(String::from("\"key4\"")),
         lexer::MaybeToken::Colon,
-        lexer::MaybeToken::LeftCurly, lexer::MaybeToken::RightCurly, lexer::MaybeToken::RightCurly,
-        lexer::MaybeToken::RightCurly
+        lexer::MaybeToken::LeftCurly,
+        lexer::MaybeToken::StringLiteral(String::from("\"key5\"")),
+        lexer::MaybeToken::Colon,
+        lexer::MaybeToken::LeftCurly,
+        lexer::MaybeToken::RightCurly,
+        lexer::MaybeToken::RightCurly,
+        lexer::MaybeToken::RightCurly,
     ];
     for (i, (tok, _)) in tokens.iter().enumerate() {
         assert_eq!(&expected_tokens[i], tok);

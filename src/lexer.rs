@@ -86,6 +86,8 @@ pub fn lex(utf8_source: UTF8Source, lex_output_sink: TokenSink) -> () {
         let mut expect_possible_linefeed = false;
         let mut expect_escaped_char = false;
         let mut expected_hex_digits = 0;
+        let mut forbid_whitespace = false;
+        let mut last_was_whitespace = false;
         for source_string in utf8_source {
             for source_char in source_string.chars() {
                 if let Some(MaybeToken::StringLiteral(s)) = &mut current_token {
@@ -248,7 +250,8 @@ pub fn lex(utf8_source: UTF8Source, lex_output_sink: TokenSink) -> () {
                     }
                 }
 
-                let matched_simple_token: Option<MaybeToken>;
+                let mut matched_simple_token: Option<MaybeToken> = None;
+                let mut found_whitespace = false;
                 match source_char {
                     '"' => {
                         if current_token.is_some() {
@@ -265,34 +268,72 @@ pub fn lex(utf8_source: UTF8Source, lex_output_sink: TokenSink) -> () {
                         continue;
                     }
                     '\r' => {
+                        found_whitespace = true;
                         expect_possible_linefeed = true;
                         current_token_info.line_number += 1;
                         current_token_info.char_position = 1;
                         current_token_info.start += 1;
-                        continue;
                     }
                     '\n' => {
+                        found_whitespace = true;
                         current_token_info.line_number += 1;
                         current_token_info.char_position = 1;
                         current_token_info.start += 1;
-                        continue;
                     }
                     ' ' | '\t' => {
+                        found_whitespace = true;
                         current_token_info.char_position += 1;
                         current_token_info.start += 1;
-                        continue;
                     }
-                    '-' => matched_simple_token = Some(MaybeToken::MinusSign),
-                    '+' => matched_simple_token = Some(MaybeToken::PlusSign),
+                    '-' => {
+                        matched_simple_token = Some(MaybeToken::MinusSign);
+                        forbid_whitespace = true;
+                    }
+                    '+' => {
+                        matched_simple_token = Some(MaybeToken::PlusSign);
+                        forbid_whitespace = true;
+                    }
                     '{' => matched_simple_token = Some(MaybeToken::LeftCurly),
                     '}' => matched_simple_token = Some(MaybeToken::RightCurly),
                     '[' => matched_simple_token = Some(MaybeToken::LeftBracket),
                     ']' => matched_simple_token = Some(MaybeToken::RightBracket),
                     ',' => matched_simple_token = Some(MaybeToken::Comma),
-                    'e' | 'E' => matched_simple_token = Some(MaybeToken::Exponent),
-                    '.' => matched_simple_token = Some(MaybeToken::Dot),
+                    'e' | 'E' => {
+                        // something like 123 E123 is invalid
+                        if last_was_whitespace {
+                            found_whitespace = true; // force to fail
+                        }
+                        matched_simple_token = Some(MaybeToken::Exponent);
+                        forbid_whitespace = true;
+                    }
+                    '.' => {
+                        // something like 456 .789 is invalid
+                        if last_was_whitespace {
+                            found_whitespace = true; // force to fail
+                        }
+                        matched_simple_token = Some(MaybeToken::Dot);
+                        forbid_whitespace = true;
+                    }
                     ':' => matched_simple_token = Some(MaybeToken::Colon),
                     _ => matched_simple_token = None,
+                }
+
+                if found_whitespace {
+                    if forbid_whitespace {
+                        lex_output_sink
+                            .send((
+                                MaybeToken::Error(ErrorInfo {
+                                    message: String::from("Whitespace is not allowed here"),
+                                    fragment: None,
+                                }),
+                                current_token_info,
+                            ))
+                            .unwrap();
+                        return;
+                    } else {
+                        last_was_whitespace = true;
+                        continue;
+                    }
                 }
 
                 if let Some(mst) = matched_simple_token {
@@ -308,6 +349,8 @@ pub fn lex(utf8_source: UTF8Source, lex_output_sink: TokenSink) -> () {
                 }
 
                 if is_digit(source_char) {
+                    last_was_whitespace = false;
+                    forbid_whitespace = false;
                     // looks like a number...
                     current_token_info.char_position += 1;
                     current_token_info.length += 1;
